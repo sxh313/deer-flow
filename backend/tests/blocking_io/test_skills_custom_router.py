@@ -1,16 +1,18 @@
-"""Regression anchor: the custom-skill rollback route must keep its history reads off the loop.
+"""Regression anchor: the custom-skill rollback route must keep its filesystem IO off the loop.
 
-``rollback_custom_skill`` offloads storage construction, existence probes and
-the ``custom/.history/<name>.jsonl`` read through ``asyncio.to_thread``, matching
-the adjacent ``get_custom_skill_history`` handler. History entries contain the
-full previous and new skill content, so reading and parsing the entire history
-on the Gateway loop would stall other requests. The post-scan current-content
-read is outside this anchor's coverage and remains a separate blocking-IO fix.
+``rollback_custom_skill`` offloads storage construction, existence probes, the
+``custom/.history/<name>.jsonl`` read, the frontmatter validation's temporary
+directory, and the post-scan read of the file it is about to replace, each
+through ``asyncio.to_thread`` — the same rule ``get_custom_skill_history``
+applies. History entries contain the full previous and new skill content, so
+reading and parsing them on the Gateway loop stalls other requests, and the
+accepted rollback path additionally answers with ``_read_custom_skill_response``,
+which walks every installed skill.
 
-The two branches driven here both return before the awaited security scan, so
-the anchor needs no scanner or model stub: the 404 branch covers construction
-plus the existence probes, and the out-of-range branch covers the full
-history-file read and parse.
+The first two branches return before the awaited security scan, so they need no
+scanner stub: the 404 branch covers construction plus the existence probes, and
+the out-of-range branch covers the full history-file read and parse. The third
+drives an accepted rollback with a stubbed model scan.
 """
 
 from __future__ import annotations
@@ -84,3 +86,19 @@ async def test_rollback_history_read_does_not_block_event_loop() -> None:
 
     assert excinfo.value.status_code == 400
     assert "history_index is out of range" in str(excinfo.value.detail)
+
+
+async def test_rollback_current_content_read_after_the_scan_does_not_block_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The accepted rollback reads the file it is about to replace, and that read is blocking IO too."""
+    await asyncio.to_thread(_install_skill)
+    await asyncio.to_thread(_write_history, [{"action": "edit", "ts": 1, "prev_content": _SKILL_MD, "new_content": _SKILL_MD}])
+    config = AppConfig.model_validate({"sandbox": {"use": "test"}})
+
+    async def _allow(*args: object, **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(decision="allow", reason="clean")
+
+    monkeypatch.setattr("app.gateway.routers.skills.scan_skill_content", _allow)
+
+    await rollback_custom_skill(_SKILL_NAME, SkillRollbackRequest(history_index=0), _admin_request(), config)
