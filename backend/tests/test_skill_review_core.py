@@ -2,6 +2,7 @@ import io
 import json
 import stat
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -111,6 +112,43 @@ def test_resource_graph_ignores_eval_fixture_references(tmp_path):
     facts = analyze_skill_package(LocalDirectoryReader(tmp_path).read())
 
     assert not any(f["rule_id"] == "resource.missing" and f["path"].startswith("evals/fixtures/") for f in facts["findings"])
+
+
+def test_resource_graph_scans_unmatched_brackets_without_quadratic_cost(tmp_path):
+    """A package of repeated ``[`` cost the reviewer seconds per 64 KiB.
+
+    The link scan retried every ``[``, so the work grew with the square of the file
+    size, and ``PackageLimits`` bounds bytes rather than time.
+    """
+    _write(tmp_path / "SKILL.md", _valid_skill())
+    _write(tmp_path / "references" / "brackets.md", "[" * 65536)
+
+    started = time.perf_counter()
+    facts = analyze_skill_package(LocalDirectoryReader(tmp_path).read())
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 2.0, f"review of 64 KiB of '[' took {elapsed:.1f}s"
+    assert not any(f["rule_id"] == "resource.missing" for f in facts["findings"])
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("See [guide](guide.md).\n", {"guide.md"}),
+        ("See [sec](guide.md#part).\n", {"guide.md"}),
+        ("![alt](pic.png)\n", {"pic.png"}),
+        ("[x](one.md) then [y](two.md)\n", {"one.md", "two.md"}),
+        ("[[a](b.md)](c.md)\n", {"b.md"}),
+        ("[a](one.md][b](two.md)\n", {"one.md][b](two.md"}),
+        ("[nest [deep]](a.md)\n", set()),
+        ("text ]( not a link\n", set()),
+    ],
+)
+def test_resource_graph_link_targets_are_unchanged_by_the_linear_scan(content, expected):
+    """The closer-driven scan has to find what ``finditer`` found, quirks included."""
+    from deerflow.skills.review.resource_graph import _extract_references
+
+    assert _extract_references(content) == expected
 
 
 def test_package_digest_is_path_independent(tmp_path):

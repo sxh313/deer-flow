@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -10,6 +11,7 @@ from deerflow.skills.package_paths import is_eval_fixture_path
 from deerflow.skills.review.models import make_finding, normalize_relative_path
 
 _MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_LINK_CLOSER = "]("
 _CODE_SPAN_RE = re.compile(r"`([^`]+)`")
 _PATH_TOKEN_RE = re.compile(r"(?<![\w./-])(?:references|scripts|templates|assets|evals)/[A-Za-z0-9._~/%+-]+")
 _RESOURCE_DIRS = {"references", "scripts", "templates", "assets", "evals"}
@@ -88,8 +90,8 @@ def build_resource_graph(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list
 
 def _extract_references(content: str) -> set[str]:
     refs: set[str] = set()
-    for match in _MARKDOWN_LINK_RE.finditer(content):
-        refs.add(match.group(1).split("#", 1)[0])
+    for raw_ref in _iter_markdown_link_targets(content):
+        refs.add(raw_ref.split("#", 1)[0])
     for match in _CODE_SPAN_RE.finditer(content):
         token = match.group(1).strip()
         if "/" in token:
@@ -97,6 +99,29 @@ def _extract_references(content: str) -> set[str]:
     for match in _PATH_TOKEN_RE.finditer(content):
         refs.add(match.group(0))
     return refs
+
+
+def _iter_markdown_link_targets(content: str) -> Iterator[str]:
+    """Yield every markdown link target, looking at each ``](` in the text once.
+
+    ``_MARKDOWN_LINK_RE.finditer`` retries the label scan at every ``[``, so a run
+    of unmatched brackets costs quadratic time - 64 KiB of them is seconds inside a
+    reviewer whose input is an untrusted package up to ``max_file_bytes`` each. A
+    label cannot cross a ``]``, so the bracket that opens a given ``](`` is the
+    first ``[`` after the previous ``]``, and every bracket in that window yields
+    the same match: testing that one candidate per closer finds what finditer
+    finds, in the same order.
+    """
+    pos = 0
+    while (closer := content.find(_LINK_CLOSER, pos)) != -1:
+        previous = content.rfind("]", pos, closer)
+        start = content.find("[", pos if previous == -1 else previous + 1, closer)
+        match = _MARKDOWN_LINK_RE.match(content, start) if start != -1 else None
+        if match is None:
+            pos = closer + 1
+            continue
+        yield match.group(1)
+        pos = match.end()
 
 
 def _resolve_reference(source_path: str, raw_ref: str) -> str | None:
