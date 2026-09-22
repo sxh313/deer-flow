@@ -111,7 +111,13 @@ def _iter_markdown_link_targets(content: str) -> Iterator[str]:
     first ``[`` after the previous ``]``, and every bracket in that window yields
     the same match: testing that one candidate per closer finds what finditer
     finds, in the same order.
+
+    A match also cannot exist without both a ``[`` and a closing ``)``, and the
+    destination scan that makes those two checks worthwhile is itself quadratic on
+    text that has neither, so bail out before the loop when either is absent.
     """
+    if "[" not in content or ")" not in content:
+        return
     pos = 0
     while (closer := content.find(_LINK_CLOSER, pos)) != -1:
         previous = content.rfind("]", pos, closer)

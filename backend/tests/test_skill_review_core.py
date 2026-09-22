@@ -114,20 +114,31 @@ def test_resource_graph_ignores_eval_fixture_references(tmp_path):
     assert not any(f["rule_id"] == "resource.missing" and f["path"].startswith("evals/fixtures/") for f in facts["findings"])
 
 
-def test_resource_graph_scans_unmatched_brackets_without_quadratic_cost(tmp_path):
-    """A package of repeated ``[`` cost the reviewer seconds per 64 KiB.
+@pytest.mark.parametrize(
+    ("name", "unit", "repeats", "tail"),
+    [
+        ("brackets", "[", 65536, ""),
+        ("closers", "](", 32768, ""),
+        ("unclosed-links", "[a](", 16384, ""),
+        ("long-destination", "[](", 21845, " " * 21845 + '"t"'),
+    ],
+)
+def test_resource_graph_scans_adversarial_bracket_text_without_quadratic_cost(tmp_path, name, unit, repeats, tail):
+    """A 64 KiB text file of bracket characters used to cost the reviewer seconds.
 
     The link scan retried every ``[``, so the work grew with the square of the file
-    size, and ``PackageLimits`` bounds bytes rather than time.
+    size, and ``PackageLimits`` bounds bytes rather than time. Each shape defeats a
+    different part of the scan: unmatched openers, closers with no label, links with
+    no closing parenthesis, and a destination that runs into a long whitespace gap.
     """
     _write(tmp_path / "SKILL.md", _valid_skill())
-    _write(tmp_path / "references" / "brackets.md", "[" * 65536)
+    _write(tmp_path / "references" / "brackets.md", unit * repeats + tail)
 
     started = time.perf_counter()
     facts = analyze_skill_package(LocalDirectoryReader(tmp_path).read())
     elapsed = time.perf_counter() - started
 
-    assert elapsed < 2.0, f"review of 64 KiB of '[' took {elapsed:.1f}s"
+    assert elapsed < 2.0, f"review of 64 KiB of {name} took {elapsed:.1f}s"
     assert not any(f["rule_id"] == "resource.missing" for f in facts["findings"])
 
 
