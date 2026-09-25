@@ -22,17 +22,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useI18n } from "@/core/i18n/hooks";
 import { env } from "@/env";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 import { useArtifacts } from "../artifacts/context";
 import { useMaybeBrowserView } from "../browser-view/context";
-import {
-  MessageDetailsProvider,
-  useMaybeMessageDetails,
-} from "../message-details/context";
 import { useThread } from "../messages/context";
 import { useMaybeSidecar } from "../sidecar/context";
 
@@ -73,50 +68,16 @@ const SidecarPanel = dynamic(
   { loading: RightPanelLoading },
 );
 
-const MessageDetailsPanel = dynamic(
-  () =>
-    import("../message-details/message-details-panel").then(
-      (module) => module.MessageDetailsPanel,
-    ),
-  { loading: RightPanelLoading },
-);
-
 const RIGHT_PANEL_ANIMATION_MS = 280;
 const RIGHT_PANEL_DEFAULT_SIZE = "40%";
 
-type RightPanelKind = "sidecar" | "artifacts" | "browser" | "details";
+type RightPanelKind = "sidecar" | "artifacts" | "browser";
 
-interface ChatBoxProps {
+const ChatBox: React.FC<{
   children: React.ReactNode;
   threadId: string;
   browserEnabled?: boolean;
-}
-
-function ChatBox(props: ChatBoxProps) {
-  const { setOpen: setArtifactsOpen } = useArtifacts();
-  const sidecar = useMaybeSidecar();
-  const browserView = useMaybeBrowserView();
-  const closeOtherPanels = useCallback(() => {
-    setArtifactsOpen(false);
-    sidecar?.close();
-    browserView?.close();
-  }, [setArtifactsOpen, sidecar, browserView]);
-
-  return (
-    <MessageDetailsProvider key={props.threadId} onSelect={closeOtherPanels}>
-      <ChatBoxContent {...props} />
-    </MessageDetailsProvider>
-  );
-}
-
-const ChatBoxContent: React.FC<ChatBoxProps> = ({
-  children,
-  threadId,
-  browserEnabled = true,
-}) => {
-  const { t } = useI18n();
-  const messageDetails = useMaybeMessageDetails();
-  const detailsOpen = messageDetails?.open ?? false;
+}> = ({ children, threadId, browserEnabled = true }) => {
   const { thread } = useThread();
   const isMobile = useIsMobile();
   const pathname = usePathname();
@@ -197,9 +158,7 @@ const ChatBoxContent: React.FC<ChatBoxProps> = ({
       ? "browser"
       : artifactPanelOpen
         ? "artifacts"
-        : detailsOpen
-          ? "details"
-          : null;
+        : null;
   const rightPanelOpen = activeRightPanel !== null;
   const [renderedRightPanel, setRenderedRightPanel] =
     useState<RightPanelKind | null>(activeRightPanel);
@@ -253,20 +212,11 @@ const ChatBoxContent: React.FC<ChatBoxProps> = ({
         sidecar?.close();
       } else if (activeRightPanel === "browser") {
         browserView?.close();
-      } else if (activeRightPanel === "details") {
-        messageDetails?.close();
       } else if (activeRightPanel === "artifacts") {
         setArtifactsOpen(false);
       }
     },
-    [
-      activeRightPanel,
-      browserView,
-      messageDetails,
-      resizableIdBase,
-      setArtifactsOpen,
-      sidecar,
-    ],
+    [activeRightPanel, browserView, resizableIdBase, setArtifactsOpen, sidecar],
   );
 
   useEffect(() => {
@@ -335,22 +285,7 @@ const ChatBoxContent: React.FC<ChatBoxProps> = ({
     }
   }, [browserEnabled, browserView]);
 
-  useEffect(() => {
-    if (detailsOpen && (sidecarOpen || browserViewOpen || artifactPanelOpen)) {
-      messageDetails?.close({ restoreFocus: false });
-    }
-  }, [
-    detailsOpen,
-    sidecarOpen,
-    browserViewOpen,
-    artifactPanelOpen,
-    messageDetails,
-  ]);
-
   const rightPanelContent = useMemo(() => {
-    if (renderedRightPanel === "details") {
-      return <MessageDetailsPanel />;
-    }
     if (renderedRightPanel === "browser") {
       return <BrowserViewPanel threadId={threadId} className="size-full" />;
     }
@@ -422,9 +357,6 @@ const ChatBoxContent: React.FC<ChatBoxProps> = ({
             if (open) {
               return;
             }
-            if (detailsOpen) {
-              messageDetails?.close();
-            }
             if (sidecarOpen) {
               sidecar?.close();
             }
@@ -446,9 +378,7 @@ const ChatBoxContent: React.FC<ChatBoxProps> = ({
                   ? "Sidecar"
                   : renderedRightPanel === "browser"
                     ? "Browser"
-                    : renderedRightPanel === "details"
-                      ? (messageDetails?.selectedDetail?.title ?? t.common.more)
-                      : "Artifacts"}
+                    : "Artifacts"}
               </SheetTitle>
               <SheetDescription>
                 Browse the side panel for this conversation.

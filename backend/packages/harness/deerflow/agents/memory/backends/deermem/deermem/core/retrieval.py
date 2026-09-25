@@ -578,13 +578,11 @@ class FTS5RetrievalAdapter:
         payload = dict(fact)
         payload["scope"] = {"userId": scope.get("userId"), "agentName": scope.get("agentName")}
         source = payload.get("source")
-        confidence = payload.get("confidence")
         return {
             "fact_id": self._document_id(fact_id, scope),
             "content": content,
             "category": str(payload.get("category") or "context"),
-            # 0.0 is a persisted confidence storage._normalize_fact accepts; only unset/null defaults.
-            "confidence": 0.5 if confidence is None else float(confidence),
+            "confidence": float(payload.get("confidence") or 0.5),
             "created_at": payload.get("createdAt") if isinstance(payload.get("createdAt"), str) else None,
             "scope_user": scope_user,
             "scope_agent": scope_agent,

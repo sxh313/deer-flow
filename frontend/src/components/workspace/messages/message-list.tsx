@@ -55,6 +55,7 @@ import {
   areStreamMetadataSnapshotsEqual,
   extractContentFromMessage,
   extractPresentFilesFromMessage,
+  extractTextFromMessage,
   getAssistantTurnCopyData,
   getBranchableAssistantGroupIds,
   getLatestEditableTurn,
@@ -73,13 +74,13 @@ import {
   buildMessageSidecarContext,
   type SidecarContext,
 } from "@/core/sidecar";
-import {
-  getSkillUsageByGroupIndex,
-  type SkillUsage,
-} from "@/core/skills/usage";
 import type { Subtask } from "@/core/tasks";
 import { useUpdateSubtask } from "@/core/tasks/context";
-import { collectRenderedSubtasks } from "@/core/tasks/subtask-render";
+import { resolveSubtaskDescription } from "@/core/tasks/presentation";
+import {
+  derivePendingSubtaskStatus,
+  parseSubtaskResult,
+} from "@/core/tasks/subtask-result";
 import type { AgentThreadState } from "@/core/threads";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +88,6 @@ import { ArtifactFileList } from "../artifacts/artifact-file-list";
 import { useMaybeBrowserView } from "../browser-view";
 import { CopyButton } from "../copy-button";
 import { useMaybeSidecar } from "../sidecar/context";
-import { SkillUsageMenu } from "../skill-usage/skill-usage-menu";
 import { Tooltip } from "../tooltip";
 
 import { ConversationOutline } from "./conversation-outline";
@@ -503,30 +503,6 @@ export function MessageList({
   }, [groupedMessages]);
   const updateSubtask = useUpdateSubtask();
   const lastGroupIndex = groupedMessages.length - 1;
-  const renderedSubtasks = useMemo(
-    () =>
-      collectRenderedSubtasks(
-        groupedMessages,
-        (groupIndex) => thread.isLoading && groupIndex === lastGroupIndex,
-        t.subtasks.failed,
-        t.subtasks.subtask,
-      ),
-    [
-      groupedMessages,
-      lastGroupIndex,
-      t.subtasks.failed,
-      t.subtasks.subtask,
-      thread.isLoading,
-    ],
-  );
-
-  useEffect(() => {
-    // Synchronize message-derived snapshots after render. The task context
-    // ignores identical updates, so streamed re-renders remain idempotent.
-    for (const task of renderedSubtasks.updates) {
-      updateSubtask(task);
-    }
-  }, [renderedSubtasks, updateSubtask]);
   const previousTurnUsageStateRef = useRef<AssistantTurnUsageState | undefined>(
     undefined,
   );
@@ -548,10 +524,6 @@ export function MessageList({
   );
   const workspaceChangeAnchorGroupIndices = useMemo(
     () => getWorkspaceChangeAnchorGroupIndices(groupedMessages),
-    [groupedMessages],
-  );
-  const skillUsageByGroupIndex = useMemo(
-    () => getSkillUsageByGroupIndex(groupedMessages),
     [groupedMessages],
   );
   useEffect(() => {
@@ -900,7 +872,6 @@ export function MessageList({
       isStreaming: boolean,
       enableBranchForTurn: boolean,
       enableRegenerateForTurn: boolean,
-      skills?: SkillUsage[],
     ) => {
       const clipboardData = getAssistantTurnCopyData(messages, { isStreaming });
       const actionTarget = [...messages]
@@ -915,9 +886,8 @@ export function MessageList({
       }
 
       return (
-        <div className="mt-2 flex justify-start gap-1 opacity-100 transition-opacity delay-200 duration-300 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 sm:opacity-0 sm:group-hover/assistant-turn:opacity-100">
+        <div className="mt-2 flex justify-start gap-1 opacity-0 transition-opacity delay-200 duration-300 group-hover/assistant-turn:opacity-100">
           {clipboardData && <CopyButton clipboardData={clipboardData} />}
-          {!isStreaming && skills && <SkillUsageMenu skills={skills} />}
           {enableBranchForTurn &&
             !isStreaming &&
             actionTarget?.id &&
@@ -984,7 +954,7 @@ export function MessageList({
                 >
                   <RefreshCcwIcon
                     className={cn(
-                      "size-4",
+                      "size-3",
                       regeneratingMessageId === actionTarget.id &&
                         "animate-spin",
                     )}
@@ -1237,9 +1207,6 @@ export function MessageList({
                         group.id !== undefined &&
                           branchableAssistantGroupIds.has(group.id),
                         group.id === latestAssistantGroupId,
-                        sidecarSurface
-                          ? undefined
-                          : skillUsageByGroupIndex.get(groupIndex),
                       )}
                   </div>,
                 );
@@ -1349,15 +1316,44 @@ export function MessageList({
               } else if (group.type === "assistant:subagent") {
                 const tasks = new Set<Subtask>();
                 for (const message of group.messages) {
-                  if (message.type !== "ai") {
-                    continue;
-                  }
-                  for (const toolCall of message.tool_calls ?? []) {
-                    const task = toolCall.id
-                      ? renderedSubtasks.tasks.get(toolCall.id)
-                      : undefined;
-                    if (toolCall.name === "task" && task) {
-                      tasks.add(task);
+                  if (message.type === "ai") {
+                    for (const toolCall of message.tool_calls ?? []) {
+                      if (toolCall.name === "task") {
+                        const taskId = toolCall.id;
+                        if (!taskId) {
+                          continue;
+                        }
+                        const status = derivePendingSubtaskStatus(
+                          taskId,
+                          group.messages,
+                          groupIsLoading,
+                        );
+                        const task: Subtask = {
+                          id: taskId,
+                          subagent_type: toolCall.args.subagent_type,
+                          description: resolveSubtaskDescription(
+                            toolCall.args.description,
+                            toolCall.args.prompt,
+                            t.subtasks.subtask,
+                          ),
+                          prompt: toolCall.args.prompt,
+                          status,
+                          ...(status === "failed"
+                            ? { error: t.subtasks.failed }
+                            : {}),
+                        };
+                        updateSubtask(task);
+                        tasks.add(task);
+                      }
+                    }
+                  } else if (message.type === "tool") {
+                    const taskId = message.tool_call_id;
+                    if (taskId) {
+                      const parsed = parseSubtaskResult(
+                        extractTextFromMessage(message),
+                        message.additional_kwargs,
+                      );
+                      updateSubtask({ id: taskId, ...parsed });
                     }
                   }
                 }
@@ -1399,10 +1395,6 @@ export function MessageList({
                       : [],
                   );
                   for (const taskId of taskIds ?? []) {
-                    const fallbackTask = renderedSubtasks.tasks.get(taskId);
-                    if (!fallbackTask) {
-                      continue;
-                    }
                     results.push(
                       <SubtaskCard
                         key={"task-group-" + taskId}
@@ -1410,7 +1402,6 @@ export function MessageList({
                         threadId={threadId}
                         runId={(message as { run_id?: string }).run_id}
                         isLoading={groupIsLoading}
-                        fallbackTask={fallbackTask}
                       />,
                     );
                   }

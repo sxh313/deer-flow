@@ -544,40 +544,23 @@ GET /api/models
       "name": "gpt-4",
       "display_name": "GPT-4",
       "supports_thinking": false,
-      "supports_reasoning_effort": false,
-      "reasoning": {"thinking": "unsupported", "effort": null, "history": null, "source": "legacy"}
+      "supports_vision": true
+    },
+    {
+      "name": "claude-3-opus",
+      "display_name": "Claude 3 Opus",
+      "supports_thinking": false,
+      "supports_vision": true
     },
     {
       "name": "deepseek-v3",
       "display_name": "DeepSeek V3",
       "supports_thinking": true,
-      "supports_reasoning_effort": true,
-      "reasoning": {
-        "thinking": "optional",
-        "effort": {"values": ["minimal", "low", "medium", "high"], "default": null, "aliases": {}},
-        "history": null,
-        "source": "legacy"
-      }
-    },
-    {
-      "name": "glm-5.3-flash",
-      "display_name": "GLM-5.3-Flash",
-      "supports_thinking": true,
-      "supports_reasoning_effort": true,
-      "reasoning": {
-        "thinking": "required",
-        "effort": {"values": ["low", "high", "max"], "default": "high", "aliases": {"minimal": "low", "medium": "high"}},
-        "history": "clear",
-        "source": "contract"
-      }
+      "supports_vision": false
     }
   ]
 }
 ```
-
-`supports_thinking` and `supports_reasoning_effort` are deprecated projections of
-`reasoning`. `reasoning.source` is `legacy` when the profile declares no
-`reasoning:` block (the booleans were normalized) and `contract` when it does.
 
 #### Get Model Details
 
@@ -593,8 +576,7 @@ GET /api/models/{model_name}
   "model": "gpt-4",
   "max_tokens": 4096,
   "supports_thinking": false,
-  "supports_reasoning_effort": false,
-  "reasoning": {"thinking": "unsupported", "effort": null, "history": null, "source": "legacy"}
+  "supports_vision": true
 }
 ```
 
@@ -843,31 +825,31 @@ GET /api/skills/{skill_name}
 }
 ```
 
-#### Enable or Disable Skill
+#### Enable Skill
 
 ```http
-PUT /api/skills/{skill_name}
-Content-Type: application/json
+POST /api/skills/{skill_name}/enable
 ```
 
-Requires an authenticated admin session.
-
-**Request Body:**
+**Response:**
 ```json
 {
-  "enabled": false
+  "success": true,
+  "message": "Skill 'pdf-processing' enabled"
 }
 ```
 
-**Response:** the updated skill. An unknown `skill_name` returns `404`.
+#### Disable Skill
+
+```http
+POST /api/skills/{skill_name}/disable
+```
+
+**Response:**
 ```json
 {
-  "name": "pdf-processing",
-  "description": "Handle PDF documents efficiently",
-  "license": "MIT",
-  "category": "public",
-  "enabled": false,
-  "editable": false
+  "success": true,
+  "message": "Skill 'pdf-processing' disabled"
 }
 ```
 
@@ -1494,9 +1476,7 @@ curl -X POST http://localhost:2026/api/threads/abc123/uploads \
   -F "files=@document.pdf"
 
 # Enable skill
-curl -X PUT http://localhost:2026/api/skills/pdf-processing \
-  -H "Content-Type: application/json" \
-  -d '{"enabled": true}'
+curl -X POST http://localhost:2026/api/skills/pdf-processing/enable
 
 # Stateless stream — no thread pre-creation
 curl -s -D - -N -X POST http://localhost:2026/api/langgraph/runs/stream \

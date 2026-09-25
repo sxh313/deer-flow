@@ -22,7 +22,6 @@ from typing import Any
 from deerflow_extension_api import ExtensionRuntimeDeps
 
 from deerflow.extensions.loader import Diagnostic
-from deerflow.extensions.model_access import ModelInvocationService
 from deerflow.extensions.policy import project_host_policy
 from deerflow.extensions.registry import LoadedExtensions
 
@@ -600,10 +599,7 @@ async def start_services(
             attempted_services.append(entry)
         cancellation_count = _cancellation_count()
         try:
-            if isinstance(service, ModelInvocationService):
-                await service.start_with_host(deps, app_config)
-            else:
-                await service.start(deps)
+            await service.start(deps)
         except asyncio.CancelledError:
             if _cancellation_count() > cancellation_count:
                 raise

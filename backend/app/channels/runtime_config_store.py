@@ -46,7 +46,6 @@ class ChannelRuntimeConfigStore:
     def _save(self) -> None:
         fd = tempfile.NamedTemporaryFile(
             mode="w",
-            encoding="utf-8",
             dir=self._path.parent,
             suffix=".tmp",
             delete=False,

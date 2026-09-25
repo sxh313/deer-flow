@@ -57,13 +57,6 @@ import {
   type HumanInputResponse,
 } from "@/core/messages/human-input";
 import { useModels } from "@/core/models/hooks";
-import {
-  getResolvedMode,
-  isThinkingRequired,
-  reasoningEffortForMode,
-  resolveReasoningEffort,
-  supportsThinking as modelSupportsThinking,
-} from "@/core/models/reasoning";
 import type { Model } from "@/core/models/types";
 import { useLocalSettings } from "@/core/settings";
 import {
@@ -120,6 +113,29 @@ function buildHiddenSidecarContextMessage({
 
 type SidecarInputMode = NonNullable<ThreadStreamOptions["context"]["mode"]>;
 
+function getResolvedMode(
+  mode: ThreadStreamOptions["context"]["mode"],
+  supportsThinking: boolean,
+): SidecarInputMode {
+  if (!supportsThinking && mode !== "flash") {
+    return "flash";
+  }
+  if (mode) {
+    return mode;
+  }
+  return supportsThinking ? "pro" : "flash";
+}
+
+function reasoningEffortForMode(mode: SidecarInputMode) {
+  return mode === "ultra"
+    ? "high"
+    : mode === "pro"
+      ? "medium"
+      : mode === "thinking"
+        ? "low"
+        : "minimal";
+}
+
 function promptMessageFiles(message: PromptInputMessage) {
   return message.files.flatMap((file) =>
     file.file instanceof File ? [file.file] : [],
@@ -156,6 +172,8 @@ export function SidecarPanel({ className }: { className?: string }) {
       models[0]
     );
   }, [models, sidecar.context.model_name]);
+
+  const supportThinking = selectedModel?.supports_thinking ?? false;
 
   const {
     thread,
@@ -212,17 +230,13 @@ export function SidecarPanel({ className }: { className?: string }) {
     );
     const fallbackModel = currentModel ?? models[0]!;
     const nextModelName = fallbackModel.name;
-    const nextMode = getResolvedMode(sidecar.context.mode, fallbackModel);
+    const nextMode = getResolvedMode(
+      sidecar.context.mode,
+      fallbackModel.supports_thinking ?? false,
+    );
     const modeChanged = sidecar.context.mode !== nextMode;
-    const nextEffort = modeChanged
-      ? reasoningEffortForMode(nextMode, fallbackModel)
-      : resolveReasoningEffort(fallbackModel, sidecar.context.reasoning_effort);
 
-    if (
-      sidecar.context.model_name === nextModelName &&
-      !modeChanged &&
-      nextEffort === sidecar.context.reasoning_effort
-    ) {
+    if (sidecar.context.model_name === nextModelName && !modeChanged) {
       return;
     }
 
@@ -230,7 +244,9 @@ export function SidecarPanel({ className }: { className?: string }) {
       ...sidecar.context,
       model_name: nextModelName,
       mode: nextMode,
-      reasoning_effort: nextEffort,
+      reasoning_effort: modeChanged
+        ? reasoningEffortForMode(nextMode)
+        : sidecar.context.reasoning_effort,
     });
   }, [models, sidecar]);
 
@@ -267,15 +283,18 @@ export function SidecarPanel({ className }: { className?: string }) {
       if (!model) {
         return;
       }
-      const nextMode = getResolvedMode(sidecar.context.mode, model);
+      const nextMode = getResolvedMode(
+        sidecar.context.mode,
+        model.supports_thinking ?? false,
+      );
       const modeChanged = sidecar.context.mode !== nextMode;
       sidecar.setContext({
         ...sidecar.context,
         model_name: modelName,
         mode: nextMode,
         reasoning_effort: modeChanged
-          ? reasoningEffortForMode(nextMode, model)
-          : resolveReasoningEffort(model, sidecar.context.reasoning_effort),
+          ? reasoningEffortForMode(nextMode)
+          : sidecar.context.reasoning_effort,
       });
       setModelDialogOpen(false);
     },
@@ -284,14 +303,14 @@ export function SidecarPanel({ className }: { className?: string }) {
 
   const handleModeSelect = useCallback(
     (mode: SidecarInputMode) => {
-      const nextMode = getResolvedMode(mode, selectedModel);
+      const nextMode = getResolvedMode(mode, supportThinking);
       sidecar.setContext({
         ...sidecar.context,
         mode: nextMode,
-        reasoning_effort: reasoningEffortForMode(nextMode, selectedModel),
+        reasoning_effort: reasoningEffortForMode(nextMode),
       });
     },
-    [sidecar, selectedModel],
+    [sidecar, supportThinking],
   );
 
   const ensureSidecarThread = useCallback(
@@ -616,7 +635,7 @@ export function SidecarPanel({ className }: { className?: string }) {
                 <SidecarAddAttachmentsButton uploadLimits={uploadLimits} />
                 <SidecarModeMenu
                   context={sidecar.context}
-                  model={selectedModel}
+                  supportThinking={supportThinking}
                   onModeSelect={handleModeSelect}
                 />
               </PromptInputTools>
@@ -730,17 +749,15 @@ function SidecarAddAttachmentsButton({
 
 function SidecarModeMenu({
   context,
-  model,
+  supportThinking,
   onModeSelect,
 }: {
   context: ThreadStreamOptions["context"];
-  model: Model | undefined;
+  supportThinking: boolean;
   onModeSelect: (mode: SidecarInputMode) => void;
 }) {
   const { t } = useI18n();
-  const supportThinking = modelSupportsThinking(model);
-  const thinkingRequired = isThinkingRequired(model);
-  const mode = getResolvedMode(context.mode, model);
+  const mode = getResolvedMode(context.mode, supportThinking);
 
   return (
     <PromptInputActionMenu>
@@ -772,36 +789,34 @@ function SidecarModeMenu({
           <DropdownMenuLabel className="text-muted-foreground text-xs">
             {t.inputBox.mode}
           </DropdownMenuLabel>
-          {!thinkingRequired && (
-            <PromptInputActionMenuItem
-              className={cn(
-                mode === "flash"
-                  ? "text-accent-foreground"
-                  : "text-muted-foreground/65",
-              )}
-              onSelect={() => onModeSelect("flash")}
-            >
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-1 font-bold">
-                  <ZapIcon
-                    className={cn(
-                      "mr-2 size-4",
-                      mode === "flash" && "text-accent-foreground",
-                    )}
-                  />
-                  {t.inputBox.flashMode}
-                </div>
-                <div className="pl-7 text-xs">
-                  {t.inputBox.flashModeDescription}
-                </div>
+          <PromptInputActionMenuItem
+            className={cn(
+              mode === "flash"
+                ? "text-accent-foreground"
+                : "text-muted-foreground/65",
+            )}
+            onSelect={() => onModeSelect("flash")}
+          >
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-1 font-bold">
+                <ZapIcon
+                  className={cn(
+                    "mr-2 size-4",
+                    mode === "flash" && "text-accent-foreground",
+                  )}
+                />
+                {t.inputBox.flashMode}
               </div>
-              {mode === "flash" ? (
-                <CheckIcon className="ml-auto size-4" />
-              ) : (
-                <div className="ml-auto size-4" />
-              )}
-            </PromptInputActionMenuItem>
-          )}
+              <div className="pl-7 text-xs">
+                {t.inputBox.flashModeDescription}
+              </div>
+            </div>
+            {mode === "flash" ? (
+              <CheckIcon className="ml-auto size-4" />
+            ) : (
+              <div className="ml-auto size-4" />
+            )}
+          </PromptInputActionMenuItem>
           {supportThinking && (
             <PromptInputActionMenuItem
               className={cn(

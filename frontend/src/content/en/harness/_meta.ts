@@ -34,9 +34,6 @@ const meta: MetaRecord = {
   subagents: {
     title: "Subagents",
   },
-  checkpoints: {
-    title: "Checkpoints",
-  },
   mcp: {
     title: "MCP Integration",
   },

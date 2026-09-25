@@ -253,16 +253,15 @@ def _link_staged_no_overwrite(
     happens AFTER the atomic failure: an existing non-regular file (a planted
     symlink — symlinks are excluded from the seeded listing, so one could
     only come from outside) stays an unsafe destination; anything else is a
-    plain collision to retry. Any other failure removes the staged file
-    best-effort and propagates; success also removes it best-effort. Staging and destination
-    are co-located in the uploads dir, so the hard link is always same-filesystem.
+    plain collision to retry. Any other failure removes the staged file and
+    propagates; success unlinks it. Staging and destination are co-located in
+    the uploads dir, so the hard link is always same-filesystem.
 
     ``unlink_staged=False`` publishes the link but leaves the staged name in
     place, for a caller that still holds a descriptor on the staged inode and
     therefore must remove it itself. Windows refuses to remove a file that
     has an open handle, so the removal cannot happen here in that case; the
-    caller owns the staged path from the moment this returns — including on
-    the failure arms below, which leave it for that caller's own cleanup.
+    caller owns the staged path from the moment this returns.
     """
     file_path = _pure_destination(uploads_dir, display_filename)
     try:
@@ -275,11 +274,13 @@ def _link_staged_no_overwrite(
             pass  # The winner vanished between link and lstat — plain retry.
         raise
     except Exception:
-        if unlink_staged:
-            _remove_staged_file(staged_path)
+        try:
+            os.unlink(staged_path)
+        except FileNotFoundError:
+            pass
         raise
     if unlink_staged:
-        _remove_staged_file(staged_path)
+        os.unlink(staged_path)
     return file_path
 
 
@@ -295,10 +296,8 @@ def _commit_upload_temp_no_overwrite(
     Same no-overwrite contract as :func:`_link_staged_no_overwrite`:
     :class:`FileExistsError` leaves the staged part in place for a
     next-suffix retry (the handle's second ``close`` is idempotent); any
-    other failure removes the staged name only when this call owns it.
-    ``unlink_staged=False`` leaves the name for the caller on every exit,
-    including the failure arms: that caller still holds a descriptor on the
-    inode and removes it itself (``_abort_upload_temp`` on its error path).
+    other failure removes it. ``unlink_staged=False`` hands the staged name
+    back to the caller, which still holds a descriptor on its inode.
     """
     upload_temp.handle.close()
     return _link_staged_no_overwrite(upload_temp.temp_path, uploads_dir, display_filename, unlink_staged=unlink_staged)

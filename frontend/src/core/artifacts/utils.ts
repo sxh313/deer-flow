@@ -21,11 +21,9 @@ function splitPathSuffix(src: string) {
 }
 
 function encodeArtifactPath(filepath: string) {
-  // This is a filesystem path, not a URL: a literal "%20" must stay part
-  // of the filename after the server decodes the request path once.
   return filepath
     .split("/")
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) => encodeURIComponent(decodePathSegment(segment)))
     .join("/");
 }
 
@@ -100,9 +98,7 @@ export function resolveArtifactURL(absolutePath: string, threadId: string) {
 
 export function resolveMarkdownArtifactURL(src: string, threadId: string) {
   const { path, suffix } = splitPathSuffix(src);
-  // Markdown destinations already carry URL escapes; decode only at this
-  // boundary before handing the raw path to the artifact URL builder.
-  return `${resolveArtifactURL(decodeRelativeArtifactPath(path), threadId)}${suffix}`;
+  return `${resolveArtifactURL(path, threadId)}${suffix}`;
 }
 
 export function resolveMessageImageURL(

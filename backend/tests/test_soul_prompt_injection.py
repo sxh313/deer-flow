@@ -13,8 +13,6 @@ personality could otherwise close its tag and forge a framework-trusted
 from __future__ import annotations
 
 from deerflow.agents.lead_agent import prompt as prompt_module
-from deerflow.config.app_config import AppConfig
-from deerflow.config.sandbox_config import SandboxConfig
 
 # A value that breaks out of the <soul> block and forges a framework-reserved
 # block the model would read as trusted context.
@@ -60,11 +58,8 @@ def test_get_agent_soul_forwards_explicit_user_id(monkeypatch) -> None:
     assert "User-scoped soul" in result
 
 
-def test_apply_prompt_template_forwards_user_id_to_agent_soul(monkeypatch, tmp_path) -> None:
+def test_apply_prompt_template_forwards_user_id_to_agent_soul(monkeypatch) -> None:
     captured = {}
-    # Keep this offline even when the developer has an operator config locally.
-    monkeypatch.setenv("DEER_FLOW_CONFIG_PATH", str(tmp_path / "missing-config.yaml"))
-    app_config = AppConfig(sandbox=SandboxConfig(use="test"))
 
     def fake_get_agent_soul(agent_name, *, user_id=None):
         captured["agent_name"] = agent_name
@@ -81,7 +76,6 @@ def test_apply_prompt_template_forwards_user_id_to_agent_soul(monkeypatch, tmp_p
     prompt_module.apply_prompt_template(
         agent_name="custom-agent",
         user_id="authenticated-user",
-        app_config=app_config,
     )
 
     assert captured == {

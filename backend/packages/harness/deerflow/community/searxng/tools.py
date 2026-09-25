@@ -41,17 +41,7 @@ async def web_search_tool(query: str, time_range: SearchTimeRange | None = None)
         max_results = 5
         if cfg is not None:
             raw = cfg.get("max_results", max_results)
-            if isinstance(raw, int):
-                max_results = raw
-            else:
-                try:
-                    max_results = int(raw)
-                except (TypeError, ValueError):
-                    logger.warning(
-                        "Invalid SearXNG max_results=%r; using default %s",
-                        raw,
-                        max_results,
-                    )
+            max_results = int(raw) if not isinstance(raw, int) else raw
 
         client = _get_searxng_client()
         search_kwargs: dict[str, object] = {"max_results": max_results}

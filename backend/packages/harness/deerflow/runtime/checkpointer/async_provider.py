@@ -82,10 +82,7 @@ async def _ensure_postgres_schema_with_pool(pool, schema: str) -> None:
     statement = create_schema_sql(schema)
     if statement is None:
         return
-    # Drain the connection's exit like the pool context around it: caller
-    # cancellation must not leave the connection checked out while the pool's
-    # own teardown runs (backend-ownership invariant in runtime/AGENTS.md).
-    async with drained_async_context(pool.connection()) as conn:
+    async with pool.connection() as conn:
         await conn.execute(statement)
 
 
