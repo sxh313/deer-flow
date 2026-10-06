@@ -29,7 +29,8 @@ _TOOL_TITLES: dict[str, str] = {
     "grep": "Search",
 }
 
-# Per-tool: which arg holds the single most salient value to show inline.
+# Per-tool: which args hold the most salient value to show inline. A key may
+# name a list of strings (e.g. ``present_files``), which is shown joined.
 _DETAIL_KEYS: dict[str, tuple[str, ...]] = {
     "read_file": ("path", "file_path", "filename"),
     "write_file": ("path", "file_path", "filename"),
@@ -41,6 +42,10 @@ _DETAIL_KEYS: dict[str, tuple[str, ...]] = {
     "grep": ("pattern", "query"),
     "glob": ("pattern",),
     "web_fetch": ("url",),
+    "task": ("description", "prompt"),
+    "batch_task": ("title",),
+    "present_files": ("filepaths",),
+    "view_image": ("image_path",),
 }
 
 # Generic arg keys to try when a tool isn't in _DETAIL_KEYS.
@@ -72,9 +77,9 @@ def format_tool_detail(tool_name: str, args: Any, limit: int = DEFAULT_DETAIL_LI
 
     keys = _DETAIL_KEYS.get(tool_name, ()) + _GENERIC_DETAIL_KEYS
     for key in keys:
-        value = args.get(key)
-        if isinstance(value, str) and value.strip():
-            return truncate(_one_line(value), limit)
+        text = _detail_text(args.get(key))
+        if text is not None:
+            return truncate(_one_line(text), limit)
 
     # Fallback: compact JSON of the args.
     try:
@@ -94,6 +99,17 @@ def format_tool_result(result: Any, limit: int = DEFAULT_RESULT_LIMIT) -> str:
         except (TypeError, ValueError):
             result = str(result)
     return truncate(_one_line(result), limit)
+
+
+def _detail_text(value: Any) -> str | None:
+    """Return the inline text an arg value contributes, or ``None`` to skip the key."""
+    if isinstance(value, str):
+        return value if value.strip() else None
+    # A partial join would hide the rest of the list, so anything but a
+    # non-empty run of non-blank strings keeps the compact-JSON fallback.
+    if isinstance(value, list) and value and all(isinstance(item, str) and item.strip() for item in value):
+        return ", ".join(value)
+    return None
 
 
 def _one_line(text: str) -> str:
