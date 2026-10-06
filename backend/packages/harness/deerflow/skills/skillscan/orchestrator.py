@@ -131,7 +131,13 @@ _SECRET_TOKEN_PATTERNS = tuple(
         r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b",
         r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b",
         r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b",
-        r"\bsk-[A-Za-z0-9]{20,}\b",
+        # The `sk-` family spells the vendor as a leading `-`-separated segment
+        # (`sk-proj-`, `sk-svcacct-`, `sk-ant-api03-`), so a real key body can
+        # contain `-` and `_`. Refusing those separators keeps only the legacy
+        # `sk-<48 alnum>` spelling. This mirrors the canonical detector in
+        # `pii_redaction_middleware._API_KEY_PATTERN` (`sk-[A-Za-z0-9_-]{20,}`),
+        # so both agree on which keys are high-confidence.
+        r"\bsk-[A-Za-z0-9_-]{20,}\b",
     )
 )
 _SENSITIVE_PATH_RE = re.compile(r"(~/.ssh|/etc/passwd|/etc/shadow|/var/run/docker\.sock|docker\.sock|169\.254\.169\.254)")
