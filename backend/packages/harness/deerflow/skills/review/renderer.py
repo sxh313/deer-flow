@@ -11,6 +11,11 @@ Readiness = Literal["blocked", "revise", "publish_candidate"]
 Assurance = Literal["static_only", "trigger_checked", "behavior_verified", "regression_verified"]
 Locale = Literal["en", "zh"]
 
+# Severities the review_report.v1 contract permits inside ``issues``; every other finding
+# is advisory and must still be visible where its recommended action is listed.
+_ISSUE_SEVERITIES = {"blocker", "error", "warning"}
+_MAX_RENDERED_FINDINGS = 5
+
 _READINESS_LABELS = {
     "en": {
         "blocked": "Not ready",
@@ -74,7 +79,7 @@ def build_static_report(
             "suggested_replacement": None,
         }
         for idx, finding in enumerate(facts.get("findings", []))
-        if finding.get("severity") in {"blocker", "error", "warning"}
+        if finding.get("severity") in _ISSUE_SEVERITIES
     ]
     dimensions = _dimensions_from_facts(facts)
     limitations = []
@@ -140,7 +145,8 @@ def render_report_markdown(report: dict[str, Any], facts: dict[str, Any] | None 
         )
     lines.extend(["", "## Findings" if not zh else "## 问题"])
     issues = report.get("issues", [])
-    if not issues:
+    advisories = _advisory_findings(facts)
+    if not issues and not advisories:
         lines.append("- No deterministic or semantic issues were reported.")
     else:
         for issue in issues:
@@ -148,6 +154,11 @@ def render_report_markdown(report: dict[str, Any], facts: dict[str, Any] | None 
             if issue.get("line") is not None:
                 location = f"{location}:{issue['line']}"
             lines.append(f"- {issue.get('severity')} {issue.get('id')} at {location}: {issue.get('problem')}")
+        for finding in advisories:
+            location = finding.get("path") or "<package>"
+            if finding.get("line") is not None:
+                location = f"{location}:{finding['line']}"
+            lines.append(f"- {finding.get('severity')} {finding.get('rule_id')} at {location}: {finding.get('message')}")
     lines.extend(["", "## Dimension Review" if not zh else "## 维度审查"])
     for dimension in report.get("dimensions", []):
         lines.append(f"- {dimension.get('id')}: {dimension.get('status')} - {dimension.get('summary')}")
@@ -166,6 +177,13 @@ def render_report_markdown(report: dict[str, Any], facts: dict[str, Any] | None 
         for action in actions:
             lines.append(f"- {action}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _advisory_findings(facts: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Advisory findings the contract cannot carry as issues, bounded like the actions beside them."""
+    if not facts:
+        return []
+    return [finding for finding in facts.get("findings", [])[:_MAX_RENDERED_FINDINGS] if finding.get("severity") not in _ISSUE_SEVERITIES]
 
 
 def _semantic_severity(severity: Any) -> str:
@@ -197,6 +215,6 @@ def _recommended_actions(facts: dict[str, Any], readiness: str) -> list[str]:
     if readiness == "publish_candidate":
         return []
     actions: list[str] = []
-    for finding in facts.get("findings", [])[:5]:
+    for finding in facts.get("findings", [])[:_MAX_RENDERED_FINDINGS]:
         actions.append(f"{finding.get('rule_id')}: {finding.get('remediation')}")
     return actions
