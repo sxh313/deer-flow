@@ -58,6 +58,14 @@ def test_extract_max_tokens_various_inputs():
     # Floats
     assert _extract_max_tokens({"max_tokens": 4096.0}) == 4096
 
+    # Non-finite numbers: an unquoted YAML `.inf` reaches here as a float, and
+    # `int(inf)` raises OverflowError rather than returning a usable budget.
+    assert _extract_max_tokens({"max_tokens": float("inf")}) is None
+    assert _extract_max_tokens({"max_tokens": float("-inf")}) is None
+    assert _extract_max_tokens({"max_tokens": float("nan")}) is None
+    assert _extract_max_tokens(SimpleNamespace(max_tokens=float("inf"))) is None
+    assert _extract_max_tokens(ModelConfig(name="test", model="m", use="u", max_tokens=float("inf"))) is None
+
     # Unparseable strings
     assert _extract_max_tokens({"max_tokens": "unlimited"}) is None
 
